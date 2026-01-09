@@ -30,20 +30,32 @@ Get pricing for a specific EC2 instance type.
 | `region` | string | No | `ap-south-1` | AWS region code |
 | `os_type` | string | No | `linux` | Operating system (linux, windows, rhel, sles) |
 | `pricing_type` | string | No | `ondemand` | Pricing type (ondemand, reserved, spot) |
+| `ri_term` | string | No | - | For Reserved Instances: `1yr` or `3yr` |
+| `ri_payment` | string | No | - | For Reserved Instances: `allUpfront`, `partialUpfront`, `noUpfront` |
+| `ri_type` | string | No | - | For Reserved Instances: `Standard`, `Convertible`, `Savings` |
+| `spot_type` | string | No | `avg` | For Spot Instances: `min`, `max`, or `avg` |
 
 **Example Requests:**
 ```bash
-# Basic usage
+# Basic usage (On-Demand)
 curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1"
+
+# Reserved Instance - 1 year, Standard, No Upfront
+curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1&pricing_type=reserved&ri_term=1yr&ri_payment=noUpfront&ri_type=Standard"
+
+# Reserved Instance - 3 year, Savings Plan, All Upfront
+curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1&pricing_type=reserved&ri_term=3yr&ri_payment=allUpfront&ri_type=Savings"
+
+# Spot Instance - Average price
+curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1&pricing_type=spot&spot_type=avg"
 
 # With Windows pricing
 curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1&os_type=windows"
-
-# Different region
-curl "https://awscalculator.vercel.app/get-price?instance_type=m5.large&region=eu-west-1"
 ```
 
-**Response:**
+**Response Examples:**
+
+**On-Demand:**
 ```json
 {
   "success": true,
@@ -54,13 +66,83 @@ curl "https://awscalculator.vercel.app/get-price?instance_type=m5.large&region=e
   "price": 0.0104,
   "currency": "USD",
   "unit": "Hrs",
+  "pricing_info": {
+    "type": "On-Demand",
+    "description": "Pay-as-you-go pricing"
+  },
   "specs": {
-    "vcpus": null,
+    "vcpus": 2,
     "memory": 1,
     "storage": null,
     "network": "Up to 5 Gigabit",
     "family": "General purpose",
-    "processor": "..."
+    "processor": "Intel Skylake E5 2686 v5"
+  }
+}
+```
+
+**Reserved Instance:**
+```json
+{
+  "success": true,
+  "instance": "t3.micro",
+  "region": "us-east-1",
+  "os": "linux",
+  "pricing_type": "reserved",
+  "price": 0.0065,
+  "currency": "USD",
+  "unit": "Hrs",
+  "pricing_info": {
+    "type": "Reserved Instance",
+    "term": "1yr",
+    "payment": "noUpfront",
+    "ri_type": "Standard",
+    "description": "Standard RI - 1yr - noUpfront"
+  },
+  "all_reserved_options": {
+    "yrTerm1Standard.allUpfront": "0.00605",
+    "yrTerm1Standard.noUpfront": "0.0065",
+    "yrTerm1Standard.partialUpfront": "0.006182",
+    "yrTerm3Standard.allUpfront": "0.003919",
+    "...": "..."
+  },
+  "specs": {
+    "vcpus": 2,
+    "memory": 1,
+    "network": "Up to 5 Gigabit",
+    "family": "General purpose"
+  }
+}
+```
+
+**Spot Instance:**
+```json
+{
+  "success": true,
+  "instance": "t3.micro",
+  "region": "us-east-1",
+  "os": "linux",
+  "pricing_type": "spot",
+  "price": 0.0039,
+  "currency": "USD",
+  "unit": "Hrs",
+  "pricing_info": {
+    "type": "Spot Instance",
+    "spot_type": "avg",
+    "description": "Spot pricing (avg)"
+  },
+  "spot_details": {
+    "min": 0.0032,
+    "max": 0.0044,
+    "avg": 0.0039,
+    "savings_vs_ondemand": 62.5,
+    "interruption_rate": 5.0
+  },
+  "specs": {
+    "vcpus": 2,
+    "memory": 1,
+    "network": "Up to 5 Gigabit",
+    "family": "General purpose"
   }
 }
 ```
@@ -78,11 +160,21 @@ Get just the price as a plain number (no JSON, no metadata).
 | `region` | string | No | `ap-south-1` | AWS region code |
 | `os_type` | string | No | `linux` | Operating system |
 | `pricing_type` | string | No | `ondemand` | Pricing type (ondemand, reserved, spot) |
+| `ri_term` | string | No | - | For Reserved Instances: `1yr` or `3yr` |
+| `ri_payment` | string | No | - | For Reserved Instances: `allUpfront`, `partialUpfront`, `noUpfront` |
+| `ri_type` | string | No | - | For Reserved Instances: `Standard`, `Convertible`, `Savings` |
+| `spot_type` | string | No | `avg` | For Spot Instances: `min`, `max`, or `avg` |
 
 **Example Requests:**
 ```bash
-# Get just the price number
+# Get just the price number (On-Demand)
 curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&region=us-east-1"
+
+# Reserved Instance price
+curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&region=us-east-1&pricing_type=reserved&ri_term=1yr&ri_payment=noUpfront&ri_type=Standard"
+
+# Spot Instance - Average price
+curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&region=us-east-1&pricing_type=spot&spot_type=avg"
 
 # Jakarta region
 curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&region=ap-southeast-3"

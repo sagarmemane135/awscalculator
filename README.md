@@ -85,18 +85,29 @@ curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&re
 - **Instance Selection**: `instance_type`, `instances`, `family`
 - **Compute Resources**: `min_vcpus`, `max_vcpus`, `min_memory`, `max_memory`
 - **Pricing**: `min_price`, `max_price`, `pricing_type`
+- **Reserved Instance Options**: `ri_term` (1yr/3yr), `ri_payment` (allUpfront/partialUpfront/noUpfront), `ri_type` (Standard/Convertible/Savings)
+- **Spot Instance Options**: `spot_type` (min/max/avg)
 - **Location & OS**: `region`, `os_type`
 - **Result Control**: `limit`, `include_pricing`
 
-📖 **[Complete API Documentation](API_DOCUMENTATION.md)** | **[Filters Reference](FILTERS_SUMMARY.md)**
+📖 **[Complete API Documentation](API_DOCUMENTATION.md)** | **[Filters Reference](FILTERS_SUMMARY.md)** | **[Pricing Guide](PRICING_GUIDE.md)**
 
 ## 💻 Usage Examples
 
 ### cURL
 
 ```bash
-# Basic price lookup
+# Basic price lookup (On-Demand)
 curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1"
+
+# Reserved Instance - 1 year, Standard, No Upfront
+curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1&pricing_type=reserved&ri_term=1yr&ri_payment=noUpfront&ri_type=Standard"
+
+# Reserved Instance - 3 year, Savings Plan, All Upfront
+curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1&pricing_type=reserved&ri_term=3yr&ri_payment=allUpfront&ri_type=Savings"
+
+# Spot Instance - Average price
+curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1&pricing_type=spot&spot_type=avg"
 
 # Advanced search
 curl "https://awscalculator.vercel.app/search?family=t3&max_price=0.05&limit=5"
@@ -158,7 +169,14 @@ console.log('Results:', data.instances);
 
 **Option 1: Get just the price (recommended)**
 ```excel
+# On-Demand
 =WEBSERVICE("https://awscalculator.vercel.app/get-price-value?instance_type=" & A2 & "&region=us-east-1")
+
+# Reserved Instance
+=WEBSERVICE("https://awscalculator.vercel.app/get-price-value?instance_type=" & A2 & "&region=us-east-1&pricing_type=reserved&ri_term=1yr&ri_payment=noUpfront&ri_type=Standard")
+
+# Spot Instance
+=WEBSERVICE("https://awscalculator.vercel.app/get-price-value?instance_type=" & A2 & "&region=us-east-1&pricing_type=spot&spot_type=avg")
 ```
 *Returns just the number - no JSON parsing needed!*
 

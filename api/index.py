@@ -25,6 +25,12 @@ _cache = {
     "ttl": 3600  # Cache for 1 hour
 }
 
+# Clear cache function for debugging
+def clear_cache():
+    """Clear the pricing data cache"""
+    _cache["data"] = None
+    _cache["timestamp"] = None
+
 @app.get("/")
 def root():
     return {
@@ -32,8 +38,8 @@ def root():
         "endpoints": {
             "get_price": {
                 "path": "/get-price",
-                "description": "Get price for a specific instance type",
-                "example": "/get-price?instance_type=t3.micro&region=ap-south-1"
+                "description": "Get price for a specific instance type (supports On-Demand, Reserved, Spot)",
+                "example": "/get-price?instance_type=t3.micro&region=us-east-1&pricing_type=reserved&ri_term=1yr&ri_payment=noUpfront&ri_type=Standard"
             },
             "search_instances": {
                 "path": "/search",
@@ -65,15 +71,20 @@ def root():
             },
             "get_price_value": {
                 "path": "/get-price-value",
-                "description": "Get only the price value (number only, no JSON)",
-                "example": "/get-price-value?instance_type=t3.micro&region=us-east-1"
+                "description": "Get only the price value (number only, no JSON) - supports all pricing types",
+                "example": "/get-price-value?instance_type=t3.micro&region=us-east-1&pricing_type=spot&spot_type=avg"
             }
         },
         "data_source": "instances.vantage.sh (powered by ec2instances.info)"
     }
 
-async def fetch_all_instance_data():
+async def fetch_all_instance_data(force_refresh=False):
     """Fetch and cache all EC2 instance data"""
+    
+    # Force refresh if requested
+    if force_refresh:
+        _cache["data"] = None
+        _cache["timestamp"] = None
     
     # Check if cache is valid
     if _cache["data"] and _cache["timestamp"]:
@@ -96,25 +107,215 @@ async def fetch_all_instance_data():
         # Return cached data even if expired, if available
         return _cache["data"] if _cache["data"] else []
 
+
+def get_reserved_instance_price(os_pricing, ri_term=None, ri_payment=None, ri_type=None):
+    """
+    Extract Reserved Instance price based on term, payment, and type
+    
+    Parameters:
+    - os_pricing: OS pricing dictionary
+    - ri_term: '1yr' or '3yr' (optional)
+    - ri_payment: 'allUpfront', 'partialUpfront', 'noUpfront' (optional)
+    - ri_type: 'Standard', 'Convertible', 'Savings' (optional)
+    
+    Returns: price value or None
+    """
+    reserved = os_pricing.get('reserved', {})
+    
+    if not reserved:
+        return None
+    
+    # If no specific parameters, return first available (backward compatibility)
+    if not ri_term and not ri_payment and not ri_type:
+        first_key = list(reserved.keys())[0] if reserved else None
+        return reserved.get(first_key) if first_key else None
+    
+    # Build the key pattern
+    term_map = {'1yr': 'yrTerm1', '3yr': 'yrTerm3'}
+    term_prefix = term_map.get(ri_term, 'yrTerm1')
+    
+    type_map = {'Standard': 'Standard', 'Convertible': 'Convertible', 'Savings': 'Savings'}
+    ri_type_name = type_map.get(ri_type, 'Standard')
+    
+    payment_map = {'allUpfront': 'allUpfront', 'partialUpfront': 'partialUpfront', 'noUpfront': 'noUpfront'}
+    payment = payment_map.get(ri_payment, 'noUpfront')
+    
+    # Try to find exact match
+    key = f"{term_prefix}{ri_type_name}.{payment}"
+    if key in reserved:
+        return reserved[key]
+    
+    # Try variations if exact match not found
+    for k, v in reserved.items():
+        if k.startswith(term_prefix) and ri_type_name in k and payment in k:
+            return v
+    
+    # Fallback: return first matching term
+    for k, v in reserved.items():
+        if k.startswith(term_prefix):
+            return v
+    
+    return None
+
+
+def get_spot_instance_price(os_pricing, spot_type='avg'):
+    """
+    Extract Spot Instance price based on type
+    
+    Parameters:
+    - os_pricing: OS pricing dictionary
+    - spot_type: 'min', 'max', or 'avg' (default: 'avg')
+    
+    Returns: price value or None
+    """
+    spot_map = {
+        'min': 'spot_min',
+        'max': 'spot_max',
+        'avg': 'spot_avg'
+    }
+    
+    spot_key = spot_map.get(spot_type.lower(), 'spot_avg')
+    price = os_pricing.get(spot_key)
+    
+    # Return the price even if it's 0 or empty string (but not None)
+    if price is not None and price != '':
+        return price
+    return None
+
+
+def get_pricing_details(os_pricing, pricing_type, ri_term=None, ri_payment=None, ri_type=None, spot_type='avg'):
+    """
+    Get pricing details with all options
+    
+    Returns: dict with price and additional info
+    """
+    # Debug: Check what we received
+    if not os_pricing:
+        print(f"get_pricing_details: os_pricing is empty or None")
+        return None
+    
+    print(f"get_pricing_details: pricing_type={pricing_type}, os_pricing keys: {list(os_pricing.keys())[:10]}")
+    
+    if pricing_type.lower() == 'ondemand':
+        price = os_pricing.get('ondemand')
+        return {
+            'price': float(price) if price else None,
+            'pricing_info': {
+                'type': 'On-Demand',
+                'description': 'Pay-as-you-go pricing'
+            }
+        }
+    
+    elif pricing_type.lower() == 'reserved':
+        price = get_reserved_instance_price(os_pricing, ri_term, ri_payment, ri_type)
+        if price:
+            return {
+                'price': float(price),
+                'pricing_info': {
+                    'type': 'Reserved Instance',
+                    'term': ri_term or '1yr',
+                    'payment': ri_payment or 'noUpfront',
+                    'ri_type': ri_type or 'Standard',
+                    'description': f'{ri_type or "Standard"} RI - {ri_term or "1yr"} - {ri_payment or "noUpfront"}'
+                },
+                'all_ri_options': os_pricing.get('reserved', {})
+            }
+        return None
+    
+    elif pricing_type.lower() == 'spot':
+        # Try to get spot price - check all possible keys
+        spot_map = {
+            'min': 'spot_min',
+            'max': 'spot_max',
+            'avg': 'spot_avg'
+        }
+        spot_key = spot_map.get(spot_type.lower(), 'spot_avg')
+        
+        # Direct check - if key exists, use it
+        if spot_key in os_pricing:
+            price = os_pricing[spot_key]
+        else:
+            price = os_pricing.get(spot_key)
+        
+        # If requested spot type not found, try to get any available spot price
+        if not price or price == '':
+            # Try spot_avg as fallback
+            if 'spot_avg' in os_pricing:
+                price = os_pricing['spot_avg']
+                spot_type = 'avg'
+            # If still None, try any spot key
+            elif not price or price == '':
+                for key in ['spot_avg', 'spot_min', 'spot_max']:
+                    if key in os_pricing and os_pricing[key]:
+                        price = os_pricing[key]
+                        spot_type = 'avg' if key == 'spot_avg' else ('min' if key == 'spot_min' else 'max')
+                        break
+        
+        # Also get all spot-related data
+        spot_min = os_pricing.get('spot_min')
+        spot_max = os_pricing.get('spot_max')
+        spot_avg = os_pricing.get('spot_avg')
+        pct_savings = os_pricing.get('pct_savings_od')
+        pct_interrupt = os_pricing.get('pct_interrupt')
+        
+        # Check if we have any spot pricing data
+        # Debug: print what we found
+        print(f"Spot pricing check - price: {price}, type: {type(price)}, os_pricing keys: {list(os_pricing.keys())[:10]}")
+        
+        if price and price != '':
+            try:
+                # Convert to float - handle both string and numeric values
+                price_float = float(price)
+                return {
+                    'price': price_float,
+                    'pricing_info': {
+                        'type': 'Spot Instance',
+                        'spot_type': spot_type,
+                        'description': f'Spot pricing ({spot_type})'
+                    },
+                    'spot_details': {
+                        'min': float(spot_min) if spot_min and spot_min != '' else None,
+                        'max': float(spot_max) if spot_max and spot_max != '' else None,
+                        'avg': float(spot_avg) if spot_avg and spot_avg != '' else None,
+                        'savings_vs_ondemand': float(pct_savings) if pct_savings and pct_savings != '' else None,
+                        'interruption_rate': float(pct_interrupt) if pct_interrupt and pct_interrupt != '' else None
+                    }
+                }
+            except (ValueError, TypeError) as e:
+                print(f"Error converting spot price to float: {e}, price value: {price}")
+                return None
+        
+        return None
+    
+    return None
+
 @app.get("/get-price")
 async def get_aws_price(
     instance_type: str,
     region: str = 'ap-south-1',
     os_type: str = 'linux',
-    pricing_type: str = 'ondemand'
+    pricing_type: str = 'ondemand',
+    ri_term: str = None,
+    ri_payment: str = None,
+    ri_type: str = None,
+    spot_type: str = 'avg'
 ):
     """
-    Get EC2 instance pricing
+    Get EC2 instance pricing with full support for Reserved Instances and Spot pricing
     
     Parameters:
     - instance_type: EC2 instance type (e.g., t3.micro)
     - region: AWS region code (e.g., ap-south-1, us-east-1)
     - os_type: Operating system (linux, windows, rhel, sles, mswinSQLWeb, mswinSQLStd)
     - pricing_type: ondemand, reserved, spot
+    - ri_term: For Reserved Instances - '1yr' or '3yr' (optional)
+    - ri_payment: For Reserved Instances - 'allUpfront', 'partialUpfront', 'noUpfront' (optional)
+    - ri_type: For Reserved Instances - 'Standard', 'Convertible', 'Savings' (optional)
+    - spot_type: For Spot Instances - 'min', 'max', or 'avg' (default: 'avg')
     """
     
     try:
-        instances = await fetch_all_instance_data()
+        instances = await fetch_all_instance_data(force_refresh=(pricing_type.lower() == 'spot'))
         
         if not instances:
             raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
@@ -140,18 +341,26 @@ async def get_aws_price(
                         }
                     
                     os_pricing = region_data.get(os_type.lower(), {})
-                    region_price = os_pricing.get(pricing_type.lower())
+                    pricing_details = get_pricing_details(
+                        os_pricing, 
+                        pricing_type, 
+                        ri_term, 
+                        ri_payment, 
+                        ri_type, 
+                        spot_type
+                    )
                     
-                    if region_price is not None:
-                        return {
+                    if pricing_details and pricing_details.get('price') is not None:
+                        response = {
                             "success": True,
                             "instance": instance_type,
                             "region": region,
                             "os": os_type,
                             "pricing_type": pricing_type,
-                            "price": float(region_price),
+                            "price": pricing_details['price'],
                             "currency": "USD",
                             "unit": "Hrs",
+                            "pricing_info": pricing_details.get('pricing_info', {}),
                             "specs": {
                                 "vcpus": instance.get('vCPU'),
                                 "memory": instance.get('memory'),
@@ -160,6 +369,26 @@ async def get_aws_price(
                                 "family": instance.get('family'),
                                 "processor": instance.get('physical_processor')
                             }
+                        }
+                        
+                        # Add additional details for RI and Spot
+                        if pricing_type.lower() == 'reserved' and 'all_ri_options' in pricing_details:
+                            response['all_reserved_options'] = pricing_details['all_ri_options']
+                        
+                        if pricing_type.lower() == 'spot' and 'spot_details' in pricing_details:
+                            response['spot_details'] = pricing_details['spot_details']
+                        
+                        return response
+                    else:
+                        # Instance found but pricing not available
+                        error_msg = f"Pricing type '{pricing_type}' not available for instance '{instance_type}' in region '{region}'"
+                        if pricing_type.lower() == 'spot':
+                            error_msg += ". Spot pricing may not be available for this instance type."
+                        elif pricing_type.lower() == 'reserved':
+                            error_msg += ". Try different RI parameters (ri_term, ri_payment, ri_type)."
+                        return {
+                            "error": error_msg,
+                            "hint": "Check if the instance supports this pricing model in this region"
                         }
             except Exception as e:
                 print(f"Error processing instance {instance.get('instance_type', 'unknown')}: {e}")
@@ -181,7 +410,11 @@ async def get_aws_price_value(
     instance_type: str,
     region: str = 'ap-south-1',
     os_type: str = 'linux',
-    pricing_type: str = 'ondemand'
+    pricing_type: str = 'ondemand',
+    ri_term: str = None,
+    ri_payment: str = None,
+    ri_type: str = None,
+    spot_type: str = 'avg'
 ):
     """
     Get only the price value as a number (no JSON, just the price)
@@ -193,10 +426,14 @@ async def get_aws_price_value(
     - region: AWS region code (e.g., ap-south-1, us-east-1)
     - os_type: Operating system (linux, windows, rhel, sles)
     - pricing_type: ondemand, reserved, spot
+    - ri_term: For Reserved Instances - '1yr' or '3yr' (optional)
+    - ri_payment: For Reserved Instances - 'allUpfront', 'partialUpfront', 'noUpfront' (optional)
+    - ri_type: For Reserved Instances - 'Standard', 'Convertible', 'Savings' (optional)
+    - spot_type: For Spot Instances - 'min', 'max', or 'avg' (default: 'avg')
     """
     
     try:
-        instances = await fetch_all_instance_data()
+        instances = await fetch_all_instance_data(force_refresh=(pricing_type.lower() == 'spot'))
         
         if not instances:
             raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
@@ -217,11 +454,23 @@ async def get_aws_price_value(
                         )
                     
                     os_pricing = region_data.get(os_type.lower(), {})
-                    region_price = os_pricing.get(pricing_type.lower())
+                    pricing_details = get_pricing_details(
+                        os_pricing, 
+                        pricing_type, 
+                        ri_term, 
+                        ri_payment, 
+                        ri_type, 
+                        spot_type
+                    )
                     
-                    if region_price is not None:
+                    if pricing_details and pricing_details.get('price') is not None:
                         # Return just the price as a string (will be converted to plain text)
-                        return str(float(region_price))
+                        return str(pricing_details['price'])
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Pricing type '{pricing_type}' not available for this instance"
+                        )
             except HTTPException:
                 raise
             except Exception as e:
@@ -269,7 +518,7 @@ async def search_instances(
     """
     
     try:
-        instances = await fetch_all_instance_data()
+        instances = await fetch_all_instance_data(force_refresh=(pricing_type.lower() == 'spot'))
         
         if not instances:
             raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
@@ -361,7 +610,7 @@ async def list_regions():
     """List all available AWS regions"""
     
     try:
-        instances = await fetch_all_instance_data()
+        instances = await fetch_all_instance_data(force_refresh=(pricing_type.lower() == 'spot'))
         
         if not instances:
             raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
@@ -389,7 +638,7 @@ async def list_families():
     """List all instance families"""
     
     try:
-        instances = await fetch_all_instance_data()
+        instances = await fetch_all_instance_data(force_refresh=(pricing_type.lower() == 'spot'))
         
         if not instances:
             raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
@@ -506,7 +755,7 @@ async def get_cheapest_instances(
     """
     
     try:
-        instances = await fetch_all_instance_data()
+        instances = await fetch_all_instance_data(force_refresh=(pricing_type.lower() == 'spot'))
         
         if not instances:
             raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
@@ -595,7 +844,7 @@ async def list_all_instances(
     """
     
     try:
-        instances = await fetch_all_instance_data()
+        instances = await fetch_all_instance_data(force_refresh=(pricing_type.lower() == 'spot'))
         
         if not instances:
             raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
