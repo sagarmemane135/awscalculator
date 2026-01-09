@@ -30,6 +30,7 @@
 
 ### Get Instance Price
 
+**Full JSON Response:**
 ```bash
 curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=us-east-1"
 ```
@@ -53,6 +54,17 @@ curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=u
 }
 ```
 
+**Just the Price Value (Number Only):**
+```bash
+curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&region=us-east-1"
+```
+
+**Response:**
+```
+0.0104
+```
+*(Just the number, no JSON - perfect for simple integrations!)*
+
 ## 📚 API Documentation
 
 ### Core Endpoints
@@ -60,6 +72,7 @@ curl "https://awscalculator.vercel.app/get-price?instance_type=t3.micro&region=u
 | Endpoint | Description | Example |
 |----------|-------------|---------|
 | `GET /get-price` | Get price for specific instance | `/get-price?instance_type=t3.micro&region=us-east-1` |
+| `GET /get-price-value` | Get **only the price** (number only, no JSON) | `/get-price-value?instance_type=t3.micro&region=us-east-1` |
 | `GET /search` | Advanced search with filters | `/search?min_vcpus=2&max_memory=8&region=us-east-1` |
 | `GET /compare` | Compare multiple instances | `/compare?instances=t3.micro,t3.small&region=us-east-1` |
 | `GET /cheapest` | Find cheapest options | `/cheapest?min_vcpus=2&min_memory=4&limit=10` |
@@ -143,11 +156,17 @@ console.log('Results:', data.instances);
 
 ### Excel
 
+**Option 1: Get just the price (recommended)**
+```excel
+=WEBSERVICE("https://awscalculator.vercel.app/get-price-value?instance_type=" & A2 & "&region=us-east-1")
+```
+*Returns just the number - no JSON parsing needed!*
+
+**Option 2: Get full JSON response**
 ```excel
 =WEBSERVICE("https://awscalculator.vercel.app/get-price?instance_type=" & A2 & "&region=us-east-1")
 ```
-
-Then parse the JSON response to extract the price field.
+*Then parse the JSON response to extract the price field.*
 
 ## 🏗️ Project Structure
 

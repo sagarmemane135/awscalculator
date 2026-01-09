@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 import httpx
 from datetime import datetime, timedelta
 
@@ -61,6 +62,11 @@ def root():
                 "path": "/instances",
                 "description": "List all available instance types",
                 "example": "/instances?region=us-east-1"
+            },
+            "get_price_value": {
+                "path": "/get-price-value",
+                "description": "Get only the price value (number only, no JSON)",
+                "example": "/get-price-value?instance_type=t3.micro&region=us-east-1"
             }
         },
         "data_source": "instances.vantage.sh (powered by ec2instances.info)"
@@ -163,6 +169,69 @@ async def get_aws_price(
             "error": f"Instance type '{instance_type}' not found",
             "hint": "Make sure the instance type name is correct (e.g., 't3.micro', not 't3micro')"
         }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.get("/get-price-value", response_class=PlainTextResponse)
+async def get_aws_price_value(
+    instance_type: str,
+    region: str = 'ap-south-1',
+    os_type: str = 'linux',
+    pricing_type: str = 'ondemand'
+):
+    """
+    Get only the price value as a number (no JSON, just the price)
+    
+    Returns: Just the price number (e.g., "0.0104")
+    
+    Parameters:
+    - instance_type: EC2 instance type (e.g., t3.micro)
+    - region: AWS region code (e.g., ap-south-1, us-east-1)
+    - os_type: Operating system (linux, windows, rhel, sles)
+    - pricing_type: ondemand, reserved, spot
+    """
+    
+    try:
+        instances = await fetch_all_instance_data()
+        
+        if not instances:
+            raise HTTPException(status_code=503, detail="Unable to fetch pricing data")
+        
+        for instance in instances:
+            try:
+                if instance.get('instance_type') == instance_type:
+                    pricing = instance.get('pricing', {})
+                    
+                    if not pricing:
+                        continue
+                    
+                    region_data = pricing.get(region, {})
+                    if not region_data:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Instance type '{instance_type}' not available in region '{region}'"
+                        )
+                    
+                    os_pricing = region_data.get(os_type.lower(), {})
+                    region_price = os_pricing.get(pricing_type.lower())
+                    
+                    if region_price is not None:
+                        # Return just the price as a string (will be converted to plain text)
+                        return str(float(region_price))
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"Error processing instance {instance.get('instance_type', 'unknown')}: {e}")
+                continue
+        
+        raise HTTPException(
+            status_code=404,
+            detail=f"Instance type '{instance_type}' not found"
+        )
     
     except HTTPException:
         raise

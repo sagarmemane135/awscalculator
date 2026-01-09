@@ -67,6 +67,41 @@ curl "https://awscalculator.vercel.app/get-price?instance_type=m5.large&region=e
 
 ---
 
+### 2. **GET /get-price-value** - Get Only Price Value
+
+Get just the price as a plain number (no JSON, no metadata).
+
+**Parameters:**
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `instance_type` | string | Yes | - | EC2 instance type (e.g., t3.micro) |
+| `region` | string | No | `ap-south-1` | AWS region code |
+| `os_type` | string | No | `linux` | Operating system |
+| `pricing_type` | string | No | `ondemand` | Pricing type (ondemand, reserved, spot) |
+
+**Example Requests:**
+```bash
+# Get just the price number
+curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&region=us-east-1"
+
+# Jakarta region
+curl "https://awscalculator.vercel.app/get-price-value?instance_type=t3.micro&region=ap-southeast-3"
+```
+
+**Response:**
+```
+0.0104
+```
+*(Just the number - perfect for Excel, simple scripts, or when you only need the price!)*
+
+**Use Cases:**
+- Excel formulas (no JSON parsing needed)
+- Simple bash scripts
+- Quick price lookups
+- When you only need the numeric value
+
+---
+
 ### 3. **GET /search** - Search Instances with Filters
 
 Search for instances matching specific criteria.
@@ -321,9 +356,17 @@ curl "https://awscalculator.vercel.app/instances?include_pricing=false"
 ## 🔧 Common Use Cases
 
 ### Excel Integration
+
+**Recommended: Get just the price (no JSON parsing needed)**
+```excel
+=WEBSERVICE("https://awscalculator.vercel.app/get-price-value?instance_type=" & A2 & "&region=us-east-1")
+```
+
+**Alternative: Get full JSON response**
 ```excel
 =WEBSERVICE("https://awscalculator.vercel.app/get-price?instance_type=" & A2 & "&region=us-east-1")
 ```
+*Then parse the JSON response to extract the price field.*
 
 ### Python
 ```python
